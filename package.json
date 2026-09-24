@@ -8,6 +8,8 @@
     "start": "node server.mjs",
     "build": "node scripts/build.mjs",
     "verify": "node scripts/verify.mjs",
+    "verify:content": "node scripts/verify-content.mjs",
+    "verify:enhancements": "node scripts/verify-enhancements.mjs",
     "verify:interactions": "node scripts/check-interactions.mjs"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+const assetBase = new URL('.', document.currentScript.src);
 const root = document.documentElement;
 const defaults = { size: 'standard', width: 'standard', theme: 'light', 'high-contrast': false, 'text-spacing': false, 'underline-links': false, 'reduce-motion': false, 'focus-reading': false, 'reading-guide': false };
 let preferences = { ...defaults };
@@ -100,6 +101,9 @@ function filterReferences() {
 referenceSearch.addEventListener('input', filterReferences);
 function revealReference(target) {
   if (!target) return;
+  for(let parent=target.parentElement;parent;parent=parent.parentElement) {
+    if(parent.tagName==='DETAILS') parent.open=true;
+  }
   const row = target.closest('[data-reference]');
   if (row?.hidden) { referenceSearch.value = ''; filterReferences(); }
 }
@@ -153,31 +157,66 @@ document.querySelector('[data-print]').addEventListener('click', () => window.pr
 document.querySelector('[data-permalink]').addEventListener('click', async event => {
   const button = event.currentTarget;
   try {
-    const metadata = await fetch('/source-metadata.json').then(r => r.json());
+    const metadata = await fetch(new URL('source-metadata.json', assetBase)).then(r => r.json());
     await navigator.clipboard.writeText(`https://en.wikipedia.org/w/index.php?title=Jordan_Spieth&oldid=${metadata.revision}`);
     button.textContent = 'Permanent link copied'; announce('Permanent link copied to clipboard.');
   } catch { button.textContent = 'Copy unavailable — see source in footer'; announce('Clipboard unavailable. The permanent source link is in the article footer.'); }
 });
 
-// Native controls keep the original navigation boxes expandable without Wikipedia scripts.
-document.querySelectorAll('table.navbox-inner,table.navbox').forEach((table,i) => {
-  const rows = [...table.querySelectorAll(':scope > tbody > tr,:scope > tr')];
-  const title = rows[0]?.querySelector('.navbox-title');
-  if (!title || rows.length < 2) return;
-  const button = document.createElement('button');
-  button.className = 'navbox-toggle'; button.textContent = 'Hide'; button.setAttribute('aria-expanded','true');
-  const ids = rows.slice(1).map((row,j) => { if(!row.id) row.id = `navbox-row-${i}-${j}`; return row.id; });
-  button.setAttribute('aria-controls',ids.join(' '));
-  button.setAttribute('aria-label',`Hide ${title.textContent.trim()} navigation`);
-  button.addEventListener('click', () => {
-    const open = button.getAttribute('aria-expanded') !== 'true';
-    rows.slice(1).forEach(row => { row.hidden = !open; });
-    button.setAttribute('aria-expanded',String(open));
-    button.textContent = open ? 'Hide' : 'Show';
-    button.setAttribute('aria-label', `${open ? 'Hide' : 'Show'} navigation`);
-  });
-  title.prepend(button);
+// Scroll controls make wide tables usable without precision trackpad gestures.
+const tableDialog=document.querySelector('#table-dialog');
+let expandedTable=null;
+function updateExpandedScroll() {
+  if(!expandedTable)return;
+  const scroll=expandedTable.scroll;
+  const controls=tableDialog.querySelector('.expanded-scroll-controls');
+  controls.hidden=scroll.scrollWidth<=scroll.clientWidth+2;
+  controls.querySelector('[data-expanded-scroll="-1"]').disabled=scroll.scrollLeft<=1;
+  controls.querySelector('[data-expanded-scroll="1"]').disabled=scroll.scrollLeft>=scroll.scrollWidth-scroll.clientWidth-2;
+}
+tableDialog.querySelectorAll('[data-expanded-scroll]').forEach(button=>button.addEventListener('click',()=>{
+  expandedTable?.scroll.scrollBy({left:Number(button.dataset.expandedScroll)*Math.max(180,expandedTable.scroll.clientWidth*.7),behavior:root.classList.contains('reduce-motion')?'instant':'smooth'});
+}));
+const tableObservers=[];
+document.querySelectorAll('.data-table-card').forEach(card=>{
+  const scroll=card.querySelector('.article-table-scroll');
+  const controls=card.querySelector('.table-scroll-actions');
+  const buttons=[...card.querySelectorAll('[data-table-scroll]')];
+  const update=()=>{
+    const overflow=scroll.scrollWidth>scroll.clientWidth+2;
+    controls.hidden=!overflow;
+    card.querySelector('[data-table-hint]').hidden=!overflow && scroll.scrollHeight<=scroll.clientHeight+2;
+    buttons[0].disabled=scroll.scrollLeft<=1;
+    buttons[1].disabled=scroll.scrollLeft>=scroll.scrollWidth-scroll.clientWidth-2;
+    if(expandedTable?.scroll===scroll)updateExpandedScroll();
+  };
+  buttons.forEach(button=>button.addEventListener('click',()=>scroll.scrollBy({left:Number(button.dataset.tableScroll)*Math.max(180,scroll.clientWidth*.7),behavior:root.classList.contains('reduce-motion')?'instant':'smooth'})));
+  scroll.addEventListener('scroll',update,{passive:true});
+  const observer=new ResizeObserver(update);observer.observe(scroll);tableObservers.push(observer);update();
 });
+document.querySelectorAll('[data-table-expand]').forEach(button=>button.addEventListener('click',()=>{
+  const scroll=document.getElementById(button.dataset.tableExpand);
+  const card=scroll.closest('.data-table-card');
+  expandedTable={scroll,card};
+  dialogTrigger=button;
+  document.querySelector('#table-dialog-title').textContent=scroll.querySelector('table').getAttribute('aria-label');
+  const holder=document.querySelector('.table-dialog-content');
+  holder.classList.add('data-table-card');
+  holder.append(scroll);
+  tableDialog.returnValue='';tableDialog.showModal();document.body.style.overflow='hidden';
+  updateExpandedScroll();
+  scroll.focus();
+}));
+tableDialog.addEventListener('close',()=>{
+  if(expandedTable){expandedTable.card.querySelector('.table-overflow-hint').before(expandedTable.scroll);expandedTable=null;}
+});
+// Printing includes every related group, even those collapsed on screen.
+let printDisclosureState=[];
+window.addEventListener('beforeprint',()=>{
+  printDisclosureState=[...document.querySelectorAll('.related-card')].map(details=>[details,details.open]);
+  printDisclosureState.forEach(([details])=>{details.open=true;});
+});
+window.addEventListener('afterprint',()=>{printDisclosureState.forEach(([details,open])=>{details.open=open;});});
 
 const readButton = document.querySelector('#read-aloud');
 const pauseButton = document.querySelector('#pause-reading');

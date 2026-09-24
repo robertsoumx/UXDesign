@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { parseHTML } from 'linkedom';
+import { enhanceLayout } from './enhance-layout.mjs';
 
 const source = readFileSync('wikipedia-source.html', 'utf8');
 const { document } = parseHTML(source);
@@ -57,7 +58,7 @@ function asset(url) {
   const extension = pathname.match(/\.(svg|png|jpg|jpeg|webp|gif)$/i)?.[0] || '.png';
   const filename = createHash('sha256').update(absolute).digest('hex').slice(0,14) + extension;
   if (!manifest.some(m=>m.url===absolute)) manifest.push({url:absolute,path:`media/${filename}`});
-  return `/media/${filename}`;
+  return `./media/${filename}`;
 }
 const imageDescriptions = {
   'Travelers-092':'Jordan Spieth at the 2025 Travelers Championship',
@@ -209,9 +210,27 @@ if(originalFooterIcons){
   for(const source of iconsContainer.querySelectorAll('source'))source.setAttribute('srcset',asset(source.getAttribute('srcset')));
   footer.append(iconsContainer);
 }
+enhanceLayout(outputDocument, icon);
+// Relative asset URLs work at both a domain root and a GitHub project subpath.
+for(const node of outputDocument.querySelectorAll('[src],[href],[srcset]')) {
+  for(const name of ['src','href','srcset']) {
+    const value=node.getAttribute(name);
+    if(value && /^\/(?!\/)/.test(value)) node.setAttribute(name,'.'+value);
+  }
+}
 html='<!doctype html>\n'+outputDocument.documentElement.outerHTML;
 mkdirSync('public/media',{recursive:true});
 writeFileSync('public/index.html',html);
+writeFileSync('public/.nojekyll','');
+// A root entry also supports an existing main / (root) Pages configuration.
+// Only local resource paths differ; this is the same complete document.
+for(const node of outputDocument.querySelectorAll('[src],[href],[srcset]')) {
+  for(const name of ['src','href','srcset']) {
+    const value=node.getAttribute(name);
+    if(value?.startsWith('./')) node.setAttribute(name,'./public/'+value.slice(2));
+  }
+}
+writeFileSync('index.html','<!doctype html>\n'+outputDocument.documentElement.outerHTML);
 writeFileSync('media-manifest.json',JSON.stringify(manifest,null,2));
 writeFileSync('public/source-metadata.json',JSON.stringify({source:'https://en.wikipedia.org/wiki/Jordan_Spieth',revision,license:'CC BY-SA 4.0',originalArticleImages:article.querySelectorAll('img').length,references:references.length,headings:headings.length,assets:manifest.length},null,2));
 console.log(`Built revision ${revision}: ${headings.length} headings, ${references.length} references, ${article.querySelectorAll('img').length} article images, ${manifest.length} unique assets.`);
